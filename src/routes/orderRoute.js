@@ -1,16 +1,23 @@
-import { Router } from "express";
-import { eq, and, or, like, between, desc, asc, sql } from "drizzle-orm";
-import * as schema from "../db/schema.js";
 import crypto from "crypto";
+import { desc, eq } from "drizzle-orm";
+import { Router } from "express";
+import db from "../db/index.js";
+import * as schema from "../db/schema.js";
+import {
+  requireBodyOwnership,
+  requireParamOwnership,
+} from "../middlewares/auth.js";
 
 const orderroute = Router();
+
+orderroute.use("/users/:userId", requireParamOwnership("userId"));
 
 // =============================================
 // ORDER ROUTES
 // =============================================
 
 // Create order
-orderroute.post("/orders", async (req, res) => {
+orderroute.post("/orders", requireBodyOwnership("userId"), async (req, res) => {
   try {
     const {
       userId,
@@ -29,30 +36,33 @@ orderroute.post("/orders", async (req, res) => {
       deliveryInstructions,
       rideId,
     } = req.body;
-    
+
     const orderReference = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-    
-    const [order] = await db.insert(schema.orders).values({
-      userId,
-      shopId,
-      orderReference,
-      orderType: orderType || "delivery",
-      paymentMethod,
-      subtotal,
-      deliveryFee: deliveryFee || 0,
-      serviceCharge: serviceCharge || 0,
-      totalAmount,
-      discountAmount: discountAmount || 0,
-      tipAmount: tipAmount || 0,
-      deliveryAddress,
-      deliveryLatitude,
-      deliveryLongitude,
-      deliveryInstructions,
-      rideId,
-      status: "pending",
-      paymentStatus: "pending",
-    }).returning();
-    
+
+    const [order] = await db
+      .insert(schema.orders)
+      .values({
+        userId,
+        shopId,
+        orderReference,
+        orderType: orderType || "delivery",
+        paymentMethod,
+        subtotal,
+        deliveryFee: deliveryFee || 0,
+        serviceCharge: serviceCharge || 0,
+        totalAmount,
+        discountAmount: discountAmount || 0,
+        tipAmount: tipAmount || 0,
+        deliveryAddress,
+        deliveryLatitude,
+        deliveryLongitude,
+        deliveryInstructions,
+        rideId,
+        status: "pending",
+        paymentStatus: "pending",
+      })
+      .returning();
+
     res.status(201).json({ success: true, data: order });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -62,12 +72,15 @@ orderroute.post("/orders", async (req, res) => {
 // Get order by ID
 orderroute.get("/orders/:id", async (req, res) => {
   try {
-    const [order] = await db.select()
+    const [order] = await db
+      .select()
       .from(schema.orders)
       .where(eq(schema.orders.orderId, parseInt(req.params.id)));
-    
+
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
     res.json({ success: true, data: order });
   } catch (error) {
@@ -79,15 +92,16 @@ orderroute.get("/orders/:id", async (req, res) => {
 orderroute.get("/users/:userId/orders", async (req, res) => {
   try {
     const { status, limit = 50 } = req.query;
-    let query = db.select()
+    let query = db
+      .select()
       .from(schema.orders)
       .where(eq(schema.orders.userId, parseInt(req.params.userId)))
       .orderBy(desc(schema.orders.orderPlacedAt));
-    
+
     if (status) {
       query = query.where(eq(schema.orders.status, status));
     }
-    
+
     const orders = await query.limit(parseInt(limit));
     res.json({ success: true, data: orders });
   } catch (error) {
@@ -100,12 +114,12 @@ orderroute.patch("/orders/:id/status", async (req, res) => {
   try {
     const { status } = req.body;
     const orderId = parseInt(req.params.id);
-    
+
     let updateData = { status };
     const timestamp = new Date();
-    
+
     // Update specific timestamps based on status
-    switch(status) {
+    switch (status) {
       case "confirmed":
         updateData.confirmedAt = timestamp;
         break;
@@ -128,14 +142,17 @@ orderroute.patch("/orders/:id/status", async (req, res) => {
         updateData.cancelledAt = timestamp;
         break;
     }
-    
-    const [order] = await db.update(schema.orders)
+
+    const [order] = await db
+      .update(schema.orders)
       .set(updateData)
       .where(eq(schema.orders.orderId, orderId))
       .returning();
-    
+
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
     res.json({ success: true, data: order });
   } catch (error) {
@@ -147,14 +164,17 @@ orderroute.patch("/orders/:id/status", async (req, res) => {
 orderroute.patch("/orders/:id/assign-rider", async (req, res) => {
   try {
     const { riderId } = req.body;
-    
-    const [order] = await db.update(schema.orders)
+
+    const [order] = await db
+      .update(schema.orders)
       .set({ riderId })
       .where(eq(schema.orders.orderId, parseInt(req.params.id)))
       .returning();
-    
+
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
     res.json({ success: true, data: order });
   } catch (error) {
@@ -169,32 +189,44 @@ orderroute.patch("/orders/:id/assign-rider", async (req, res) => {
 // Initialize Paystack Payment
 orderroute.post("/payments/initialize", async (req, res) => {
   try {
-    const { email, amount, userId, deliveryAddress, deliveryLatitude, deliveryLongitude } = req.body;
+    const {
+      email,
+      amount,
+      userId,
+      deliveryAddress,
+      deliveryLatitude,
+      deliveryLongitude,
+    } = req.body;
     // console.log(req.body)
-    const paystackResponse = await fetch("https://api.paystack.co/transaction/initialize", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email,
-        amount, // in pesewas / smallest currency subunit (e.g. 2500 for GHS 25)
-        callback_url: "https://myapp.internal/paystack-callback",
-        metadata: {
-          userId,
-          deliveryAddress,
-          deliveryLatitude,
-          deliveryLongitude,
-          cancel_action: "https://myapp.internal/paystack-cancel",
+    const paystackResponse = await fetch(
+      "https://api.paystack.co/transaction/initialize",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          "Content-Type": "application/json",
         },
-      }),
-    });
+        body: JSON.stringify({
+          email,
+          amount, // in pesewas / smallest currency subunit (e.g. 2500 for GHS 25)
+          callback_url: "https://myapp.internal/paystack-callback",
+          metadata: {
+            userId,
+            deliveryAddress,
+            deliveryLatitude,
+            deliveryLongitude,
+            cancel_action: "https://myapp.internal/paystack-cancel",
+          },
+        }),
+      },
+    );
 
     const responseData = await paystackResponse.json();
 
     if (!responseData.status) {
-      return res.status(400).json({ success: false, message: responseData.message });
+      return res
+        .status(400)
+        .json({ success: false, message: responseData.message });
     }
 
     res.json({
@@ -205,7 +237,7 @@ orderroute.post("/payments/initialize", async (req, res) => {
       },
     });
   } catch (error) {
-    console.log(error)
+    console.log(error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -278,19 +310,28 @@ orderroute.post("/payments/verify", async (req, res) => {
   try {
     const { reference } = req.body;
 
-    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+    const response = await fetch(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        },
       },
-    });
+    );
 
     const result = await response.json();
 
     if (result.status && result.data.status === "success") {
-      res.json({ success: true, message: "Payment verified successfully", data: result.data });
+      res.json({
+        success: true,
+        message: "Payment verified successfully",
+        data: result.data,
+      });
     } else {
-      res.status(400).json({ success: false, message: "Payment verification failed" });
+      res
+        .status(400)
+        .json({ success: false, message: "Payment verification failed" });
     }
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

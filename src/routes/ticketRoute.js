@@ -1,46 +1,60 @@
+import { desc, eq } from "drizzle-orm";
 import { Router } from "express";
-import { eq, and, or, like, between, desc, asc, sql } from "drizzle-orm";
+import db from "../db/index.js";
 import * as schema from "../db/schema.js";
+import {
+  requireBodyOwnership,
+  requireParamOwnership,
+} from "../middlewares/auth.js";
 
-const ticketrouter = Router()
+const ticketrouter = Router();
 
+ticketrouter.use("/users/:userId", requireParamOwnership("userId"));
 
 // =============================================
 // SUPPORT TICKET ROUTES
 // =============================================
 
 // Create support ticket
-ticketrouter.post("/support-tickets", async (req, res) => {
-  try {
-    const { userId, subject, message, category, priority } = req.body;
-    
-    const [ticket] = await db.insert(schema.supportTickets).values({
-      userId,
-      subject,
-      message,
-      category: category || "other",
-      priority: priority || "medium",
-    }).returning();
-    
-    res.status(201).json({ success: true, data: ticket });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
+ticketrouter.post(
+  "/support-tickets",
+  requireBodyOwnership("userId"),
+  async (req, res) => {
+    try {
+      const { userId, subject, message, category, priority } = req.body;
+
+      const [ticket] = await db
+        .insert(schema.supportTickets)
+        .values({
+          userId,
+          subject,
+          message,
+          category: category || "other",
+          priority: priority || "medium",
+        })
+        .returning();
+
+      res.status(201).json({ success: true, data: ticket });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+);
 
 // Get user support tickets
 ticketrouter.get("/users/:userId/tickets", async (req, res) => {
   try {
     const { status, limit = 50 } = req.query;
-    let query = db.select()
+    let query = db
+      .select()
       .from(schema.supportTickets)
       .where(eq(schema.supportTickets.userId, parseInt(req.params.userId)))
       .orderBy(desc(schema.supportTickets.createdAt));
-    
+
     if (status) {
       query = query.where(eq(schema.supportTickets.status, status));
     }
-    
+
     const tickets = await query.limit(parseInt(limit));
     res.json({ success: true, data: tickets });
   } catch (error) {
@@ -52,8 +66,9 @@ ticketrouter.get("/users/:userId/tickets", async (req, res) => {
 ticketrouter.patch("/support-tickets/:id", async (req, res) => {
   try {
     const { status, assignedTo, priority } = req.body;
-    
-    const [ticket] = await db.update(schema.supportTickets)
+
+    const [ticket] = await db
+      .update(schema.supportTickets)
       .set({
         status,
         assignedTo,
@@ -62,9 +77,11 @@ ticketrouter.patch("/support-tickets/:id", async (req, res) => {
       })
       .where(eq(schema.supportTickets.ticketId, parseInt(req.params.id)))
       .returning();
-    
+
     if (!ticket) {
-      return res.status(404).json({ success: false, message: "Ticket not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Ticket not found" });
     }
     res.json({ success: true, data: ticket });
   } catch (error) {
@@ -72,4 +89,4 @@ ticketrouter.patch("/support-tickets/:id", async (req, res) => {
   }
 });
 
-export default ticketrouter
+export default ticketrouter;

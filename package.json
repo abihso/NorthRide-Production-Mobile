@@ -5,7 +5,9 @@
   "description": "",
   "main": "src/index.js",
   "scripts": {
-    "start": "nodemon src/index.js"
+    "start": "nodemon src/index.js",
+    "seed:shops": "node src/db/seedShops.js",
+    "seed:test-rider": "node src/db/seedTestRider.js"
   },
   "keywords": [],
   "author": "",

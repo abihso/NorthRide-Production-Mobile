@@ -1,79 +1,89 @@
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { Router } from "express";
-import { eq, and, desc, sql,or } from "drizzle-orm";
 import db from "../db/index.js";
 import * as schema from "../db/schema.js";
+import {
+  requireBodyOwnership,
+  requireParamOwnership,
+} from "../middlewares/auth.js";
 
 const deliveryRouter = Router();
+
+deliveryRouter.use("/users/:userId", requireParamOwnership("userId"));
 
 // =============================================
 // DELIVERY ROUTES
 // =============================================
 
 // 1. Create a new delivery order
-deliveryRouter.post("/deliveries", async (req, res) => {
-  console.log(req.body)
-  try {
-    const { 
-      senderId,               
-      deliveryType,         
-      pickupAddress,        
-      pickupLatitude,       
-      pickupLongitude,      
-      pickupContactName,    
-      pickupContactPhone,   
-      dropoffAddress,       
-      dropoffLatitude,      
-      dropoffLongitude,     
-      recipientName,        
-      recipientPhone,       
-      packageWeightKg,      
-      distanceKm,           
-      deliveryFee,          
-      totalAmount,          
-      paymentMethod,   
-      paymentStatus,     
-    } = req.body;
-                
-    const deliveryReference = `DEL-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+deliveryRouter.post(
+  "/deliveries",
+  requireBodyOwnership("senderId"),
+  async (req, res) => {
+    console.log(req.body);
+    try {
+      const {
+        senderId,
+        deliveryType,
+        pickupAddress,
+        pickupLatitude,
+        pickupLongitude,
+        pickupContactName,
+        pickupContactPhone,
+        dropoffAddress,
+        dropoffLatitude,
+        dropoffLongitude,
+        recipientName,
+        recipientPhone,
+        packageWeightKg,
+        distanceKm,
+        deliveryFee,
+        totalAmount,
+        paymentMethod,
+        paymentStatus,
+      } = req.body;
 
-    const newDelivery = await db.transaction(async (tx) => {
-      const [insertedDelivery] = await tx
-        .insert(schema.deliveries)
-        .values({
-          senderId,
-          deliveryType,
-          status: "pending",
-          pickupAddress,
-          pickupLatitude,
-          pickupLongitude,
-          pickupContactName,
-          pickupContactPhone,
-          dropoffAddress,
-          dropoffLatitude,
-          dropoffLongitude,
-          recipientName,
-          recipientPhone,
-          packageWeightKg,
-          isFragile : true,
-          distanceKm,
-          deliveryFee,
-          tipAmount : 0,
-          totalAmount,
-          paymentMethod,
-          paymentStatus, 
-          deliveryReference
-        })
-        .returning();
+      const deliveryReference = `DEL-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-      return insertedDelivery;
-    });
+      const newDelivery = await db.transaction(async (tx) => {
+        const [insertedDelivery] = await tx
+          .insert(schema.deliveries)
+          .values({
+            senderId,
+            deliveryType,
+            status: "pending",
+            pickupAddress,
+            pickupLatitude,
+            pickupLongitude,
+            pickupContactName,
+            pickupContactPhone,
+            dropoffAddress,
+            dropoffLatitude,
+            dropoffLongitude,
+            recipientName,
+            recipientPhone,
+            packageWeightKg,
+            isFragile: true,
+            distanceKm,
+            deliveryFee,
+            tipAmount: 0,
+            totalAmount,
+            paymentMethod,
+            paymentStatus,
+            deliveryReference,
+          })
+          .returning();
 
-    res.status(201).json({ success: true, data: newDelivery });
-  } catch (error) {
-    console.log(error)
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
+        return insertedDelivery;
+      });
+
+      res.status(201).json({ success: true, data: newDelivery });
+    } catch (error) {
+      console.log(error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+);
 
 // 2. Get delivery details with items
 deliveryRouter.get("/deliveries/:id", async (req, res) => {
@@ -86,7 +96,9 @@ deliveryRouter.get("/deliveries/:id", async (req, res) => {
       .where(eq(schema.deliveries.deliveryId, deliveryId));
 
     if (!delivery) {
-      return res.status(404).json({ success: false, message: "Delivery not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Delivery not found" });
     }
 
     const items = await db
@@ -110,18 +122,15 @@ deliveryRouter.get("/deliveries/:id", async (req, res) => {
 deliveryRouter.get("/users/:userId/deliveries", async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
-    const { 
-      role = "sender", 
-      status,          
-      limit = 50       
-    } = req.query;
+    const { role = "sender", status, limit = 50 } = req.query;
 
-    const userCondition = role === "rider"
-      ? eq(schema.deliveries.riderId, userId)
-      : eq(schema.deliveries.senderId, userId);
+    const userCondition =
+      role === "rider"
+        ? eq(schema.deliveries.riderId, userId)
+        : eq(schema.deliveries.senderId, userId);
 
-    const conditions = status 
-      ? and(userCondition, eq(schema.deliveries.status, status)) 
+    const conditions = status
+      ? and(userCondition, eq(schema.deliveries.status, status))
       : userCondition;
 
     const userDeliveries = await db
@@ -132,7 +141,7 @@ deliveryRouter.get("/users/:userId/deliveries", async (req, res) => {
       .limit(parseInt(limit));
 
     const grouped = userDeliveries.reduce((acc, delivery) => {
-      const dateKey = new Date(delivery.createdAt).toISOString().split('T')[0];
+      const dateKey = new Date(delivery.createdAt).toISOString().split("T")[0];
       if (!acc[dateKey]) {
         acc[dateKey] = [];
       }
@@ -141,8 +150,8 @@ deliveryRouter.get("/users/:userId/deliveries", async (req, res) => {
     }, {});
 
     const groupedArray = Object.keys(grouped).map((date) => ({
-      date: date,             
-      deliveries: grouped[date] 
+      date: date,
+      deliveries: grouped[date],
     }));
 
     res.json({ success: true, data: groupedArray });
@@ -156,10 +165,10 @@ deliveryRouter.patch("/deliveries/:id/status", async (req, res) => {
   try {
     const deliveryId = parseInt(req.params.id);
 
-    const { 
-      status,        // string (e.g., "picked_up" | "delivered" | "cancelled")
-      riderId,       // number - ID of assigned rider
-      earningAmount  // string - amount earned by rider when completed
+    const {
+      status, // string (e.g., "picked_up" | "delivered" | "cancelled")
+      riderId, // number - ID of assigned rider
+      earningAmount, // string - amount earned by rider when completed
     } = req.body;
 
     const updateData = {
@@ -193,7 +202,9 @@ deliveryRouter.patch("/deliveries/:id/status", async (req, res) => {
     });
 
     if (!updatedDelivery) {
-      return res.status(404).json({ success: false, message: "Delivery not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Delivery not found" });
     }
 
     // ==========================================
@@ -201,15 +212,15 @@ deliveryRouter.patch("/deliveries/:id/status", async (req, res) => {
     // ==========================================
     const targetRiderId = riderId || updatedDelivery.riderId;
     if (targetRiderId) {
-      const io = req.app.get('io');
+      const io = req.app.get("io");
       if (io) {
-        io.to(`rider_${targetRiderId}`).emit('delivery_updated', {
+        io.to(`rider_${targetRiderId}`).emit("delivery_updated", {
           success: true,
           deliveryId,
           status: updatedDelivery.status,
           paymentStatus: updatedDelivery.paymentStatus,
           earningAmount: earningAmount || "0.00",
-          message: `Delivery #${deliveryId} status updated to ${status}`
+          message: `Delivery #${deliveryId} status updated to ${status}`,
         });
       }
     }
@@ -236,16 +247,18 @@ deliveryRouter.patch("/deliveries/:id/cancel", async (req, res) => {
       .returning();
 
     if (!cancelledDelivery) {
-      return res.status(404).json({ success: false, message: "Delivery not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Delivery not found" });
     }
 
     // Notify rider if delivery is cancelled
     if (cancelledDelivery.riderId) {
-      const io = req.app.get('io');
+      const io = req.app.get("io");
       if (io) {
-        io.to(`rider_${cancelledDelivery.riderId}`).emit('delivery_cancelled', {
+        io.to(`rider_${cancelledDelivery.riderId}`).emit("delivery_cancelled", {
           deliveryId,
-          message: `Delivery #${deliveryId} has been cancelled.`
+          message: `Delivery #${deliveryId} has been cancelled.`,
         });
       }
     }
@@ -269,7 +282,10 @@ deliveryRouter.post("/deliveries/:id/reject", async (req, res) => {
       reason,
     });
 
-    res.json({ success: true, message: "Delivery offer rejected successfully" });
+    res.json({
+      success: true,
+      message: "Delivery offer rejected successfully",
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -288,7 +304,7 @@ deliveryRouter.get("/riders/:riderId/earnings", async (req, res) => {
 
     const totalEarningsResult = await db
       .select({
-        total: sql`SUM(${schema.riderEarnings.amount})`
+        total: sql`SUM(${schema.riderEarnings.amount})`,
       })
       .from(schema.riderEarnings)
       .where(eq(schema.riderEarnings.riderId, riderId));
@@ -305,88 +321,101 @@ deliveryRouter.get("/riders/:riderId/earnings", async (req, res) => {
   }
 });
 
-deliveryRouter.get("/users/:userId/deliveries/:status/:category", async (req, res) => {
-                    // /users/7/deliveries/delivered/send
-  console.log("hit")
-  try {
-    const userId = parseInt(req.params.userId);
-    const status = req.params.status;
-    const category = req.params.category;
-    console.log("userId:", userId, "status:", status);
+deliveryRouter.get(
+  "/users/:userId/deliveries/:status/:category",
+  async (req, res) => {
+    // /users/7/deliveries/delivered/send
+    console.log("hit");
+    try {
+      const userId = parseInt(req.params.userId);
+      const status = req.params.status;
+      const category = req.params.category;
+      console.log("userId:", userId, "status:", status);
 
-    const userDeliveries = await db
-      .select()
-      .from(schema.deliveries)
-      .where(and(
-        eq(schema.deliveries.senderId, userId),
-        eq(schema.deliveries.deliveryType, category),
-        eq(schema.deliveries.status, status)
-      ))
-      .orderBy(desc(schema.deliveries.createdAt));
-
-    // Group deliveries by date (YYYY-MM-DD)
-    const grouped = userDeliveries.reduce((acc, delivery) => {
-      const dateKey = new Date(delivery.createdAt).toISOString().split('T')[0];
-      if (!acc[dateKey]) {
-        acc[dateKey] = [];
-      }
-      acc[dateKey].push(delivery);
-      return acc;
-    }, {});
-
-    const groupedArray = Object.keys(grouped).map((date) => ({
-      date: date,             
-      deliveries: grouped[date] 
-    }));
-
-    return res.json({ success: true, data: groupedArray });
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-
-deliveryRouter.get("/users/:userId/deliveries/:status/:category/past", async (req, res) => {
-  try {
-    const userId = parseInt(req.params.userId);
-    const status = req.params.status;
-    console.log("userId:", userId, "status:", status);
-
-    const userDeliveries = await db
-      .select()
-      .from(schema.deliveries)
-      .where(and(
-        eq(schema.deliveries.senderId, userId),
-        eq(schema.deliveries.deliveryType, status),
-        or(
-          eq(schema.deliveries.status, "pending"),
-          eq(schema.deliveries.status, "delivered"),
-          eq(schema.deliveries.status, "cancelled"),
+      const userDeliveries = await db
+        .select()
+        .from(schema.deliveries)
+        .where(
+          and(
+            eq(schema.deliveries.senderId, userId),
+            eq(schema.deliveries.deliveryType, category),
+            eq(schema.deliveries.status, status),
+          ),
         )
-      ))
-      .orderBy(desc(schema.deliveries.createdAt));
+        .orderBy(desc(schema.deliveries.createdAt));
 
-    // Group deliveries by date (YYYY-MM-DD)
-    const grouped = userDeliveries.reduce((acc, delivery) => {
-      const dateKey = new Date(delivery.createdAt).toISOString().split('T')[0];
-      if (!acc[dateKey]) {
-        acc[dateKey] = [];
-      }
-      acc[dateKey].push(delivery);
-      return acc;
-    }, {});
+      // Group deliveries by date (YYYY-MM-DD)
+      const grouped = userDeliveries.reduce((acc, delivery) => {
+        const dateKey = new Date(delivery.createdAt)
+          .toISOString()
+          .split("T")[0];
+        if (!acc[dateKey]) {
+          acc[dateKey] = [];
+        }
+        acc[dateKey].push(delivery);
+        return acc;
+      }, {});
 
-    const groupedArray = Object.keys(grouped).map((date) => ({
-      date: date,             
-      deliveries: grouped[date] 
-    }));
+      const groupedArray = Object.keys(grouped).map((date) => ({
+        date: date,
+        deliveries: grouped[date],
+      }));
 
-    return res.json({ success: true, data: groupedArray });
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
+      return res.json({ success: true, data: groupedArray });
+    } catch (error) {
+      console.log(error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  },
+);
+
+deliveryRouter.get(
+  "/users/:userId/deliveries/:status/:category/past",
+  async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      const status = req.params.status;
+      console.log("userId:", userId, "status:", status);
+
+      const userDeliveries = await db
+        .select()
+        .from(schema.deliveries)
+        .where(
+          and(
+            eq(schema.deliveries.senderId, userId),
+            eq(schema.deliveries.deliveryType, status),
+            or(
+              eq(schema.deliveries.status, "pending"),
+              eq(schema.deliveries.status, "delivered"),
+              eq(schema.deliveries.status, "cancelled"),
+            ),
+          ),
+        )
+        .orderBy(desc(schema.deliveries.createdAt));
+
+      // Group deliveries by date (YYYY-MM-DD)
+      const grouped = userDeliveries.reduce((acc, delivery) => {
+        const dateKey = new Date(delivery.createdAt)
+          .toISOString()
+          .split("T")[0];
+        if (!acc[dateKey]) {
+          acc[dateKey] = [];
+        }
+        acc[dateKey].push(delivery);
+        return acc;
+      }, {});
+
+      const groupedArray = Object.keys(grouped).map((date) => ({
+        date: date,
+        deliveries: grouped[date],
+      }));
+
+      return res.json({ success: true, data: groupedArray });
+    } catch (error) {
+      console.log(error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  },
+);
 
 export default deliveryRouter;
